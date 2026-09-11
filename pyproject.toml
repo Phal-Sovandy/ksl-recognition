@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ksl-recognition"
+version = "0.1.0"
+description = "Khmer Sign Language recognition: MediaPipe landmark extraction, a mask-aware GCN + Transformer model, and training/inference pipelines."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+
+dependencies = [
+    "torch>=2.0",
+    "numpy",
+    "opencv-python",
+    "mediapipe",
+    "pandas",
+    "pillow",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+# python -m mediapipe webcam demo (scripts/inference/infer_realtime.py)
+realtime = ["psutil"]
+# scripts/export/encode_ksl_classes.py writes an .xlsx map
+export = ["openpyxl"]
+# scripts/analysis/eda_landmarks.py's dimensionality-reduction plots
+analysis = ["matplotlib", "scikit-learn", "umap-learn", "scipy"]
+dev = ["ksl-recognition[realtime,export,analysis]"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+ksl_recognition = ["assets/*.ttf"]

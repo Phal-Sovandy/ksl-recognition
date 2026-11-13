@@ -87,6 +87,15 @@ def build_adjacency() -> torch.Tensor:
     return A
 
 
+def build_fully_connected_adjacency() -> torch.Tensor:
+    """
+    Ablation of build_adjacency() (Table 4): every node connected to every
+    other node, discarding the bones/fingers/bridge structure above. No
+    self-loops (MaskedGraphConv adds those separately).
+    """
+    return torch.ones(NUM_NODES, NUM_NODES) - torch.eye(NUM_NODES)
+
+
 # --------------------------------------------------------------------------- #
 # 2. Mask-aware graph convolution
 # --------------------------------------------------------------------------- #
@@ -135,7 +144,8 @@ class MaskedGraphConv(nn.Module):
 # 3. Spatial encoder: stack of graph convs + mask-aware node pooling
 # --------------------------------------------------------------------------- #
 class SpatialGCN(nn.Module):
-    def __init__(self, in_ch: int, hidden=(64, 128), A: torch.Tensor | None = None):
+    def __init__(self, in_ch: int, hidden=(64, 128), A: torch.Tensor | None = None,
+                 mask_aware: bool = True):
         super().__init__()
         if A is None:
             A = build_adjacency()
@@ -151,9 +161,15 @@ class SpatialGCN(nn.Module):
             for i in range(len(hidden))
         ])
         self.out_dim = hidden[-1]
+        # Ablation switch: when False, visibility is never consulted -- absent
+        # joints (already zero-filled in `x` by feature assembly) are treated
+        # as ordinary present nodes, exactly like a generic skeleton GCN.
+        self.mask_aware = mask_aware
 
     def forward(self, x, vis):
         # x: (B, T, V, Cin)  vis: (B, T, V)
+        if not self.mask_aware:
+            vis = torch.ones_like(vis)
         for conv, norm, skip in zip(self.layers, self.norms, self.skips):
             x = F.relu(norm(conv(x, vis) + skip(x)))
         # Mask-aware mean over nodes: divide by visible node count, not V.
@@ -205,13 +221,16 @@ class SignEncoder(nn.Module):
     """Shared encoder: SpatialGCN -> TemporalTransformer -> (B, d) CLS vector."""
 
     def __init__(self, in_ch: int, d_model=128, gcn_hidden=(64, 128),
-                 nhead=4, num_layers=4, dim_ff=256, dropout=0.2, max_len=128):
+                 nhead=4, num_layers=4, dim_ff=256, dropout=0.2, max_len=128,
+                 mask_aware: bool = True, fully_connected: bool = False):
         super().__init__()
-        A = build_adjacency()
+        # Ablation switch (Table 4): swap the anatomical bones/fingers graph
+        # for a fully-connected one.
+        A = build_fully_connected_adjacency() if fully_connected else build_adjacency()
         self.node_type = nn.Parameter(torch.zeros(NUM_NODES, in_ch))  # per-joint bias
         nn.init.trunc_normal_(self.node_type, std=0.02)
 
-        self.gcn = SpatialGCN(in_ch, hidden=gcn_hidden, A=A)
+        self.gcn = SpatialGCN(in_ch, hidden=gcn_hidden, A=A, mask_aware=mask_aware)
         self.proj = nn.Linear(self.gcn.out_dim, d_model)
         self.temporal = TemporalTransformer(
             d_model=d_model, nhead=nhead, num_layers=num_layers,

@@ -91,6 +91,10 @@ def main():
     ap.add_argument("--seed",          type=int,   default=42)
     ap.add_argument("--no-augment",    action="store_true",
                     help="disable training augmentation")
+    ap.add_argument("--no-visibility-masking", action="store_true",
+                    help="ablation: disable node-level visibility masking in the "
+                         "GCN (absent joints, already zero-filled by feature "
+                         "assembly, are treated as ordinary present nodes)")
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
@@ -128,7 +132,9 @@ def main():
         d_model=d, gcn_hidden=(d // 2, d), nhead=max(1, d // 32),
         num_layers=args.num_layers, dim_ff=d * 2,
         dropout=args.dropout, max_len=args.max_len,
+        mask_aware=not args.no_visibility_masking,
     ).to(device)
+    print("visibility masking:", "off (ablation)" if args.no_visibility_masking else "on")
 
     # MPS doesn't implement the TransformerEncoder nested-tensor fast path (only
     # triggered in eval mode). Disable it so eval stays on the GPU. Same results.
@@ -185,7 +191,8 @@ def main():
                 "arch": dict(in_ch=5, d_model=d, gcn_hidden=(d // 2, d),
                              nhead=max(1, d // 32), num_layers=args.num_layers,
                              dim_ff=d * 2, dropout=args.dropout,
-                             max_len=args.max_len),
+                             max_len=args.max_len,
+                             mask_aware=not args.no_visibility_masking),
             }, args.out)
             flag = "  <- best, saved"
         print(f"epoch {epoch:>3} | train loss {tr_loss:.3f} acc {tr_acc:.3f} | "
